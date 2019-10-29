@@ -66,7 +66,7 @@ trait QueueEvent {
   def id: Long
 }
 
-case class LeftEvent(override val t: Double, override val id: Long) extends QueueEvent
+case class LeftEvent(override val t: Double, override val id: Long/*, processTime:Double, queuedTime:Double*/) extends QueueEvent
 
 case class EnterEvent(override val t: Double, override val id: Long) extends QueueEvent
 
@@ -185,16 +185,26 @@ case class QueuedSystem(inDistribution: Distribution, outDistribution: Distribut
       val newEnqueuedRatio = (oldState.stats.waitRation * oldState.t + processingFull * dt) / event.t //enqueue ratio ̅Πᵣ
 
 
-      newState.copy(stats = Stats(newRejectedRatio, newAvgK, newUtilization, newAvgTheta, newEnqueuedRatio, newAvgQueued))
+      val A0 = newLambda * newAvgTheta
+      val newAvgEpsilon = newAvgTheta / (oldState.system.m - A0)
+
+      val newAvgEta = newAvgQueued * newAvgTheta / oldState.system.m //avg in queue system time ̅η
+      val newAvgDelta = newAvgEta + newAvgTheta //avg inside system time ̅δ
+
+
+
+
+      newState.copy(stats = Stats(newRejectedRatio, newAvgK, newUtilization, newAvgTheta, newEnqueuedRatio, newAvgQueued, newAvgEta, newAvgEpsilon))
 
     }
 }
 
 
-case class Stats(rejectedRatio: Double = 0, avgK: Double = 0, utilization: Double = 0, avgTheta: Double = 0, waitRation:Double = 0, avgQueued:Double = 0) {
+case class Stats(rejectedRatio: Double = 0, avgK: Double = 0, utilization: Double = 0, avgTheta: Double = 0, waitRation:Double = 0, avgQueued:Double = 0, avgEta:Double = 0,avgEpsilon:Double = 0) {
   override def toString: String = {
     s"\n(̅Πₚ = ${rejectedRatio.round(4)}, K̅ = ${avgK.round(4)}, ρ = ${utilization.round(4)}, " +
-      s"̅θ = ${avgTheta.round(4)}, ̅Πᵣ = ${waitRation.round(4)}, avgQueue: ${avgQueued.round(4)})"
+      s"̅θ = ${avgTheta.round(4)}, ̅Πᵣ = ${waitRation.round(4)}, avgQueue: ${avgQueued.round(4)}, " +
+      s"̅η:  ${avgEta.round(4)}), ̅ε: ${avgEpsilon.round(4)}}"
   }
 }
 
@@ -237,15 +247,15 @@ object Prove extends App {
 
   implicit private val random: Random = new Random(1234)
 
-  // QueuedSystem(ExponentialDistribution(2), ExponentialDistribution(1), m = 1, l = 20).simulate2.take(100).foreach(println)
+   QueuedSystem(ExponentialDistribution(2), ExponentialDistribution(1), m = 1, l = 20).simulate.take(100).foreach(println)
 
   val λ = 67
-  //val A0 = 50
+  val A0 = 20
   val avgθ: Double = 0.0121
   val μ = Helper.μ(avgθ)
-  val system = QueuedSystem(ExponentialDistribution(λ), ExponentialDistribution(μ), m = 1, l = 1000000000)
+  val system = QueuedSystem(ExponentialDistribution(λ), ExponentialDistribution(μ), m = 1, l = 1000000)
 
-  val take = 1000000
+  val take = 10000000
   val asd = system.simulate2.take(take)
 
   println(asd.last)
