@@ -1,6 +1,5 @@
 import java.util.Random
 
-import scala.collection.mutable
 import scala.math._
 
 
@@ -28,7 +27,9 @@ case class ExponentialDistribution(λ: Double) extends Distribution {
 
   def F_inv(p: Double): Double = log(1 - p) / -λ
 
-  override def toString: String = s"ExpD($λ)"
+  import Helper.RichDouble
+
+  override def toString: String = s"ExpD(${λ.round(4)})"
 }
 
 object Helper {
@@ -53,10 +54,11 @@ object Helper {
 
 import Helper.RichDouble
 
-case class QueuedSystemState(system: QueuedSystem, t: Double, rejected: Int, computed: Int, processing: Int, queued: Int, stats: Stats) {
+case class QueuedSystemState(system: QueuedSystem, t: Double, rejected: Int, computed: Int, processing: Int, queued: Int, totalDequeued: Int, stats: Stats) {
   override def toString: String = {
     val tR = math.round(t * 100) / 100.0
-    s"[λ: ${system.inDistribution}, μ: ${system.outDistribution}, m: ${system.m}, l: ${system.l}] --> {t: $tR | processing: $processing | queued: $queued | computed: $computed | rej: $rejected | stats: $stats"
+    s"[λ: ${system.inDistribution}, μ: ${system.outDistribution}, m: ${system.m}, l: ${system.l}] --> {t: $tR | " +
+      s"processing: $processing | queued: $queued | computed: $computed | rej: $rejected | totalDequeued: $totalDequeued | stats: $stats"
   }
 }
 
@@ -66,7 +68,7 @@ trait QueueEvent {
   def id: Long
 }
 
-case class LeftEvent(override val t: Double, override val id: Long/*, processTime:Double, queuedTime:Double*/) extends QueueEvent
+case class LeftEvent(override val t: Double, override val id: Long, processTime: Double, queuedTime: Double) extends QueueEvent
 
 case class EnterEvent(override val t: Double, override val id: Long) extends QueueEvent
 
@@ -74,7 +76,9 @@ case class RejectedEvent(override val t: Double, override val id: Long) extends 
 
 case class EnqueuedEvent(override val t: Double, override val id: Long) extends QueueEvent
 
-case class DequeuedEvent(override val t: Double, override val id: Long) extends QueueEvent
+case class DequeuedEvent(override val t: Double, override val id: Long, queuedTime: Double) extends QueueEvent
+
+
 
 case class QueuedSystem(inDistribution: Distribution, outDistribution: Distribution, m: Int, l: Int) {
 
@@ -82,14 +86,14 @@ case class QueuedSystem(inDistribution: Distribution, outDistribution: Distribut
 
     new Iterator[QueueEvent] {
 
-      case class Item(enterTime: Double, exitTime: Double, id: Long)
+      case class Item(enterTime: Double, queueExitTime: Double, exitTime: Double, id: Long)
 
       var id: Long = 0
       var cachedNext: Item = _
       var enterStream: Iterator[Double] = inDistribution.generateEvents.iterator
       var inside = 0
-      var items: mutable.Buffer[Item] = mutable.Buffer()
-      var enqueued: mutable.Buffer[Item] = mutable.Buffer()
+      var items: FastFixedOrderedQueue[Item] = new FastFixedOrderedQueue[Item](m, (i1, i2) => i1.exitTime - i2.exitTime)
+      var enqueued: FastFixedQueue[Item] = new FastFixedQueue[Item](l)
       var lastDequeued: Item = _
 
 
@@ -98,7 +102,7 @@ case class QueuedSystem(inDistribution: Distribution, outDistribution: Distribut
           val enter = enterStream.next()
           val left = enter + outDistribution.next
           id = id + 1
-          Item(enter, left, id)
+          Item(enter, enter, left, id)
         } else {
           val tmp = cachedNext
           cachedNext = null
@@ -116,7 +120,7 @@ case class QueuedSystem(inDistribution: Distribution, outDistribution: Distribut
 
       def newEnterItem(): EnterEvent = {
         val item = getNext()
-        items.append(item)
+        items.enqueue(item)
         inside = inside + 1
         EnterEvent(item.enterTime, item.id)
       }
@@ -127,33 +131,33 @@ case class QueuedSystem(inDistribution: Distribution, outDistribution: Distribut
         if (lastDequeued != null) {
           val tmp = lastDequeued
           lastDequeued = null
-          DequeuedEvent(tmp.enterTime, tmp.id)
+          DequeuedEvent(tmp.queueExitTime, tmp.id, tmp.queueExitTime - tmp.enterTime)
         } else {
           items match {
-            case mutable.Buffer() => //will be processed
+            case _ if items.isEmpty => //will be processed
               newEnterItem()
             case _ =>
-              val nextExiting = items.minBy(_.exitTime)
+              val nextExiting = items.peek().get
               val next = peekNext()
               if (next.enterTime < nextExiting.exitTime && inside < m) { //will be processed
                 newEnterItem()
               } else if (next.enterTime < nextExiting.exitTime && inside < m + l) { //will be enqueued
                 val item = getNext()
-                enqueued.append(item)
+                enqueued.enqueue(item)
                 inside = inside + 1
                 EnqueuedEvent(item.enterTime, item.id)
               } else if (next.enterTime < nextExiting.exitTime) { //will be rejected
                 val item = getNext()
                 RejectedEvent(item.enterTime, item.id)
               } else { //next will left
-                items.remove(items.indexOf(nextExiting))
+                items.dequeue()
                 inside = inside - 1
-                if (enqueued.nonEmpty) {
-                  lastDequeued = Item(/*enqueued.head.enterTime*/ nextExiting.exitTime, nextExiting.exitTime + outDistribution.next, enqueued.head.id)
-                  enqueued remove 0
-                  items append lastDequeued
+                val queueHead = enqueued.dequeue()
+                if (queueHead.isDefined) {
+                  lastDequeued = Item(queueHead.get.enterTime, nextExiting.exitTime, nextExiting.exitTime + outDistribution.next, queueHead.get.id)
+                  items enqueue lastDequeued
                 }
-                LeftEvent(nextExiting.exitTime, nextExiting.id)
+                LeftEvent(nextExiting.exitTime, nextExiting.id, nextExiting.exitTime - nextExiting.queueExitTime, nextExiting.queueExitTime - nextExiting.enterTime)
               }
           }
         }
@@ -163,102 +167,89 @@ case class QueuedSystem(inDistribution: Distribution, outDistribution: Distribut
 
 
   def simulate2(implicit random: Random): LazyList[QueuedSystemState] =
-    simulate.scanLeft[QueuedSystemState](QueuedSystemState(this, 0.0, 0, 0, 0, 0, Stats())) { case (oldState, event) =>
+    simulate.scanLeft[QueuedSystemState](QueuedSystemState(this, 0.0, 0, 0, 0, 0, 0, Stats())) { case (oldState, event) =>
       val newState = event match {
         case RejectedEvent(t_event, _) => oldState.copy(t = t_event, rejected = oldState.rejected + 1)
-        case LeftEvent(t_event, _) => oldState.copy(t = t_event, processing = oldState.processing - 1, computed = oldState.computed + 1)
+
+        case LeftEvent(t_event, _, processTime, queueTime) =>
+          oldState.copy(t = t_event, processing = oldState.processing - 1, computed = oldState.computed + 1,
+            stats = oldState.stats.copy(
+              avgTheta = oldState.stats.avgTheta.add(processTime),
+              avgEta = oldState.stats.avgEta.add(queueTime)
+            ))
+
+
         case EnqueuedEvent(t_event, _) => oldState.copy(t = t_event, queued = oldState.queued + 1)
-        case DequeuedEvent(t_event, _) => oldState.copy(t = t_event, processing = oldState.processing + 1, queued = oldState.queued - 1)
+
+        case DequeuedEvent(t_event, _, queueTime) =>
+          oldState.copy(t = t_event, processing = oldState.processing + 1, queued = oldState.queued - 1, totalDequeued = oldState.totalDequeued + 1, stats = oldState.stats.copy(
+            avgEpsilon = oldState.stats.avgEpsilon.add(queueTime)
+          ))
+
         case EnterEvent(t_event, _) => oldState.copy(t = t_event, processing = oldState.processing + 1)
       }
 
       val dt = event.t - oldState.t
-      val newAvgK = (oldState.stats.avgK * oldState.t + (oldState.processing + oldState.queued) * dt) / event.t //average item inside the system
-      val newUtilization = (oldState.stats.utilization * oldState.t + (oldState.processing.toDouble / oldState.system.m) * dt) / event.t //utilization of process power
-      val newRejectedRatio = if ((newState.rejected + newState.computed) == 0) 0 else newState.rejected.toDouble / (newState.rejected + newState.computed) //rejected ratio ̅Πₚ
-      val newLambda = (newState.computed + newState.rejected + newState.queued + newState.processing) / event.t //input rate λ
-      val newAvgQueued = (oldState.stats.avgQueued * oldState.t + oldState.queued * dt) / event.t //average queue length
-      val newAvgProcessing = newAvgK - newAvgQueued //average processing items count
-      val newAvgTheta = newAvgProcessing / (newLambda * (1 - newRejectedRatio)) //average in process time ̅θ
+      val newAvgK = (oldState.stats.avgK * oldState.t + (oldState.processing + oldState.queued) * dt) / event.t //average item inside the system K̅
 
-      val processingFull = if(newState.system.l > 0 && (newState.processing == newState.system.m || newState.queued > 0)) 1.0 else 0.0
+      val newUtilization = (oldState.stats.utilization * oldState.t + (oldState.processing.toDouble / oldState.system.m) * dt) / event.t //utilization of process power ρ
+
+      val processingFull = if (newState.system.l > 0 && (newState.processing == newState.system.m || newState.queued > 0)) 1.0 else 0.0
       val newEnqueuedRatio = (oldState.stats.waitRation * oldState.t + processingFull * dt) / event.t //enqueue ratio ̅Πᵣ
 
-
-      val A0 = newLambda * newAvgTheta
-      val newAvgEpsilon = newAvgTheta / (oldState.system.m - A0)
-
-      val newAvgEta = newAvgQueued * newAvgTheta / oldState.system.m //avg in queue system time ̅η
-      val newAvgDelta = newAvgEta + newAvgTheta //avg inside system time ̅δ
+      val newRejectedRatio = if ((newState.rejected + newState.computed) == 0) 0 else newState.rejected.toDouble / (newState.rejected + newState.computed) //rejected ratio ̅Πₚ
 
 
+      val newAvgQueued = (oldState.stats.avgQueued * oldState.t + oldState.queued * dt) / event.t //average queue length
+
+      //val newLambda = (newState.computed + newState.rejected + newState.queued + newState.processing) / event.t //input rate λ
+      //val A0 = newLambda * newState.stats.avgTheta //Erlangs
+      // val newAvgEpsilon = newState.stats.avgTheta / (oldState.system.m - A0) //average time in queue only if enqueued ̅ε
 
 
-      newState.copy(stats = Stats(newRejectedRatio, newAvgK, newUtilization, newAvgTheta, newEnqueuedRatio, newAvgQueued, newAvgEta, newAvgEpsilon))
-
+      newState.copy(stats = Stats(
+        newRejectedRatio,
+        newAvgK,
+        newUtilization,
+        newState.stats.avgTheta,
+        newEnqueuedRatio,
+        newAvgQueued,
+        newState.stats.avgEta,
+        newState.stats.avgEpsilon))
     }
 }
 
 
-case class Stats(rejectedRatio: Double = 0, avgK: Double = 0, utilization: Double = 0, avgTheta: Double = 0, waitRation:Double = 0, avgQueued:Double = 0, avgEta:Double = 0,avgEpsilon:Double = 0) {
+case class Stats(rejectedRatio: Double = 0, avgK: Double = 0, utilization: Double = 0, avgTheta: Avg = Avg(),
+                 waitRation: Double = 0, avgQueued: Double = 0, avgEta: Avg = Avg(), avgEpsilon: Avg = Avg()) {
   override def toString: String = {
-    s"\n(̅Πₚ = ${rejectedRatio.round(4)}, K̅ = ${avgK.round(4)}, ρ = ${utilization.round(4)}, " +
-      s"̅θ = ${avgTheta.round(4)}, ̅Πᵣ = ${waitRation.round(4)}, avgQueue: ${avgQueued.round(4)}, " +
-      s"̅η:  ${avgEta.round(4)}), ̅ε: ${avgEpsilon.round(4)}}"
+    s"\n(̅Πₚ = ${rejectedRatio.round(4)}, ̅Πᵣ = ${waitRation.round(4)}, K̅ = ${avgK.round(4)}, " +
+      s"̅θ = ${avgTheta.value.round(4)}, ̅η:  ${avgEta.value.round(4)}, ̅ε: ${avgEpsilon.value.round(4)}, ρ = ${utilization.round(4)}, " +
+      s"avgQueue: ${avgQueued.round(4)})"
   }
 }
 
 object Prove extends App {
 
-  implicit class RichQueuedSystemSimulation(simulation: Iterable[QueuedSystemState]) {
-    def utilization: Double = simulation.scanLeft[(Double, Double)]((0.0, 0.0)) { case (v, s: QueuedSystemState) => {
-      val dt = s.t - v._2
-      val utilization = (s.processing.toDouble / s.system.m) * dt
-      (v._1 + utilization, s.t)
-    }
-    }.map(v => v._1 / v._2).last
-
-
-    def avgProcessing: Double = simulation.scanLeft[(Double, Double)]((0.0, 0.0)) { case (v, s: QueuedSystemState) => {
-      val dt = s.t - v._2
-      (v._1 + s.processing * dt, s.t)
-    }
-    }.map(v => v._1 / v._2).last
-
-    def rejected: Double = {
-      val last = simulation.last
-      last.rejected.toDouble / (last.computed + last.rejected)
-    }
-
-    /*
-   persone in coda * dt ==> in quell'intervallo loro hanno aspettato tot
-    * */
-
-    def avgTimeInQueue: Double = {
-      val last = simulation.last
-      simulation.scanLeft[(Double, Double)]((0.0, 0.0)) { case (v, s: QueuedSystemState) => {
-        val dt = s.t - v._2
-        val timeInQueue = s.queued.toDouble * dt
-        (v._1 + timeInQueue, s.t)
-      }
-      }.map(v => v._1 / (last.computed + last.rejected)).last
-    }
-  }
-
   implicit private val random: Random = new Random(1234)
 
-   QueuedSystem(ExponentialDistribution(2), ExponentialDistribution(1), m = 1, l = 20).simulate.take(100).foreach(println)
+  // QueuedSystem(ExponentialDistribution(2), ExponentialDistribution(3), m = 1, l = 20).simulate.take(100).foreach(println)
 
   val λ = 67
-  val A0 = 20
+  val A0 = 60
   val avgθ: Double = 0.0121
   val μ = Helper.μ(avgθ)
   val system = QueuedSystem(ExponentialDistribution(λ), ExponentialDistribution(μ), m = 1, l = 1000000)
 
-  val take = 10000000
+  val take = 1000000
   val asd = system.simulate2.take(take)
 
   println(asd.last)
+
+
+
+
+
 
   //println("avg k: " + asd.avgProcessing)
   //println("perdita: " + asd.rejected)
