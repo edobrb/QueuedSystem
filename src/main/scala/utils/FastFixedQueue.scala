@@ -1,3 +1,5 @@
+package utils
+
 import scala.reflect.ClassTag
 
 class FastFixedQueue[T:ClassTag](maxSize: Int) {

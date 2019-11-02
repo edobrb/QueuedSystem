@@ -1,3 +1,5 @@
+package utils
+
 import scala.reflect.ClassTag
 
 class FastFixedOrderedQueue[T: ClassTag](maxSize: Int, compare: (T, T) => Double) {
