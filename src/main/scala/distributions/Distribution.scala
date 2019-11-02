@@ -16,5 +16,5 @@ abstract class Distribution(implicit random: Random) extends TimeEventsGenerator
 
 
   def element: Double = F_inv(random.nextDouble())
-  def events: LazyList[Double] = LazyList.continually(element).scanLeft(element)(_+_)
+  def events: Iterable[Double] = LazyList.continually(element).scanLeft(element)(_+_)
 }

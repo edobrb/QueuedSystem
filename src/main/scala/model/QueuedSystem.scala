@@ -6,10 +6,10 @@ import distributions.{Distribution, EventsGenerator, TimeEventGenerator, TimeEve
 import model.QueueEvents._
 import utils.{FastFixedOrderedQueue, FastFixedQueue}
 
+
 case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGenerator, m: Int, l: Int) {
 
-  def simulate(implicit random: Random): LazyList[QueueEvent] = {
-
+  def eventsSimulation(implicit random: Random): Iterable[QueueEvent] = {
     new Iterator[QueueEvent] {
       case class Item(enterTime: Double, queueExitTime: Double, exitTime: Double, id: Long)
 
@@ -23,6 +23,7 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
 
 
       def getNext(): Item = {
+       // Thread.sleep(0, 100)
         if (cachedNext == null) {
           val enter:Double = enterStream.next()
           val left:Double = enter + outEvents.element
@@ -91,8 +92,8 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
   }
 
 
-  def simulate2(implicit random: Random): LazyList[QueuedSystemState] =
-    simulate.scanLeft[QueuedSystemState](QueuedSystemState(this, 0.0, 0, 0, 0, 0, 0, Stats())) { case (oldState, event) =>
+  def statesSimulation(implicit random: Random): Iterable[QueuedSystemState] =
+    eventsSimulation.scanLeft[QueuedSystemState](QueuedSystemState(this, 0.0, 0, 0, 0, 0, 0, Stats())) { case (oldState, event) =>
       val newState = event match {
         case RejectedEvent(t_event, _) => oldState.copy(t = t_event, rejected = oldState.rejected + 1)
 
@@ -119,11 +120,11 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
 
       val newUtilization = (oldState.stats.utilization * oldState.t + (oldState.processing.toDouble / oldState.system.m) * dt) / event.t //utilization of process power ρ
 
-      val processingFull = if (newState.system.l > 0 && (oldState.processing == oldState.system.m || oldState.queued > 0)) 1.0 else 0.0
-      val newEnqueuedRatio = (oldState.stats.waitRation * oldState.t + processingFull * dt) / event.t //enqueue ratio ̅Πᵣ
+      val processingFull = if (oldState.system.l > 0 && (oldState.processing == oldState.system.m || oldState.queued > 0)) 1.0 else 0.0
+      val newEnqueuedRatio = (oldState.stats.waitRatio * oldState.t + processingFull * dt) / event.t //enqueue ratio ̅Πᵣ
+      //or if(newState.computed == 0) 0 else newState.totalDequeued.toDouble / newState.computed
 
       val newRejectedRatio = if ((newState.rejected + newState.computed) == 0) 0 else newState.rejected.toDouble / (newState.rejected + newState.computed) //rejected ratio ̅Πₚ
-
 
       val newAvgQueued = (oldState.stats.avgQueued * oldState.t + oldState.queued * dt) / event.t //average queue length
 
@@ -144,7 +145,7 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
     }
 
 
-  def leftEvents(implicit random: Random):TimeEventsGenerator = EventsGenerator(simulate.collect {
+  def leftEvents(implicit random: Random):TimeEventsGenerator = EventsGenerator(eventsSimulation.collect {
     case LeftEvent(t, _, _, _) => t
   })
 }

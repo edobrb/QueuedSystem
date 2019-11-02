@@ -1,16 +1,16 @@
 package distributions
 
 object EventsGenerator {
-  def apply(eventsGenerator: LazyList[Double]): TimeEventsGenerator = new TimeEventsGenerator {
-    override def events: LazyList[Double] = eventsGenerator
+  def apply(eventsGenerator: Iterable[Double]): TimeEventsGenerator = new TimeEventsGenerator {
+    override def events: Iterable[Double] = eventsGenerator
   }
 }
 
 trait EventsGenerator[T] {
-  def events: LazyList[T]
+  def events: Iterable[T]
 }
 trait EventGenerator[T] {
-  def element:T
+  def element: T
 }
 
 trait TimeEventsGenerator extends EventsGenerator[Double]
