@@ -2,20 +2,20 @@ package model
 
 import java.util.Random
 
-import distributions.{Distribution, EventsGenerator, TimeEventGenerator, TimeEventsGenerator}
+import distributions.EventsGenerator._
 import model.QueueEvents._
 import utils.{FastFixedOrderedQueue, FastFixedQueue}
 
 
-case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGenerator, m: Int, l: Int) {
+case class QueuedSystem(inEvents: TimeEventsGenerator, outDurations: TimeDurationGenerator, m: Int, l: Int)(implicit random: Random) {
 
-  def eventsSimulation(implicit random: Random): Iterable[QueueEvent] = {
+  def eventsSimulation: Iterator[QueueEvent] = {
     new Iterator[QueueEvent] {
       case class Item(enterTime: Double, queueExitTime: Double, exitTime: Double, id: Long)
 
       var id: Long = 0
       var cachedNext: Item = _
-      var enterStream: Iterator[Double] = inEvents.events.iterator
+      var enterStream: Iterator[Double] = inEvents.events
       var inside = 0
       var items: FastFixedOrderedQueue[Item] = new FastFixedOrderedQueue[Item](m, (i1, i2) => i1.exitTime - i2.exitTime)
       var enqueued: FastFixedQueue[Item] = new FastFixedQueue[Item](l)
@@ -23,10 +23,9 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
 
 
       def getNext(): Item = {
-       // Thread.sleep(0, 100)
         if (cachedNext == null) {
           val enter:Double = enterStream.next()
-          val left:Double = enter + outEvents.element
+          val left:Double = enter + outDurations.element
           id = id + 1
           Item(enter, enter, left, id)
         } else {
@@ -80,7 +79,7 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
                 inside = inside - 1
                 val queueHead = enqueued.dequeue()
                 if (queueHead.isDefined) {
-                  lastDequeued = Item(queueHead.get.enterTime, nextExiting.exitTime, nextExiting.exitTime + outEvents.element, queueHead.get.id)
+                  lastDequeued = Item(queueHead.get.enterTime, nextExiting.exitTime, nextExiting.exitTime + outDurations.element, queueHead.get.id)
                   items enqueue lastDequeued
                 }
                 LeftEvent(nextExiting.exitTime, nextExiting.id, nextExiting.exitTime - nextExiting.queueExitTime, nextExiting.queueExitTime - nextExiting.enterTime)
@@ -88,12 +87,12 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
           }
         }
       }
-    }.to(LazyList)
+    }
   }
 
 
-  def statesSimulation(implicit random: Random): Iterable[QueuedSystemState] =
-    eventsSimulation.scanLeft[QueuedSystemState](QueuedSystemState(this, 0.0, 0, 0, 0, 0, 0, Stats())) { case (oldState, event) =>
+  def statesSimulation: Iterator[QueuedSystemState] =
+    eventsSimulation.scanLeft[QueuedSystemState](QueuedSystemState(this)) { case (oldState, event) =>
       val newState = event match {
         case RejectedEvent(t_event, _) => oldState.copy(t = t_event, rejected = oldState.rejected + 1)
 
@@ -145,7 +144,9 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outEvents: TimeEventGener
     }
 
 
-  def leftEvents(implicit random: Random):TimeEventsGenerator = EventsGenerator(eventsSimulation.collect {
-    case LeftEvent(t, _, _, _) => t
-  })
+  def output: TimeEventsGenerator = new TimeEventsGenerator {
+    override def events: Iterator[Double] = eventsSimulation.collect {
+      case LeftEvent(t, _, _, _) => t
+    }
+  }
 }

@@ -2,7 +2,10 @@ package distributions
 
 import java.util.Random
 
-abstract class Distribution(implicit random: Random) extends TimeEventsGenerator with TimeEventGenerator {
+import distributions.EventsGenerator._
+
+
+abstract class Distribution(implicit random: Random) extends TimeEventsGenerator with TimeDurationGenerator {
   //def f(t: Double): Double
 
   //def F(t: Double): Double
@@ -16,5 +19,5 @@ abstract class Distribution(implicit random: Random) extends TimeEventsGenerator
 
 
   def element: Double = F_inv(random.nextDouble())
-  def events: Iterable[Double] = LazyList.continually(element).scanLeft(element)(_+_)
+  def events: Iterator[Double] = Iterator.continually(element).scanLeft(element)(_+_)
 }
