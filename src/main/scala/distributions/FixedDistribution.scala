@@ -9,7 +9,7 @@ import utils.RichDouble._
  *
  * @param v the value of this fixed distribution
  */
-case class FixedDistribution(v: Double)(implicit random: Random) extends Distribution {
+case class FixedDistribution(v: Double) extends Distribution {
   def F_inv(p: Double): Double = v
 
   override def toString: String = s"FixedD(${v.round(4)})"

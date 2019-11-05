@@ -1,4 +1,8 @@
 package distributions
+
+import java.util.Random
+
+import distributions.EventGenerator._
 import utils.RichIterator._
 
 object EventsGenerator {
@@ -8,8 +12,10 @@ object EventsGenerator {
 
   type TimeEventsGenerator = EventsGenerator[Double]
 
-  type TimeDurationGenerator = EventGenerator[Double]
-
+  implicit def distributionToTimeEventsGenerator(d: Distribution)(implicit random: Random): TimeEventsGenerator =
+    new TimeEventsGenerator {
+      override def events: Iterator[Double] = Iterator.continually(d.element).scanLeft(d.element)(_ + _)
+    }
 }
 
 trait EventsGenerator[T] {
@@ -21,7 +27,6 @@ trait EventsGenerator[T] {
     override def events: Iterator[T] = _this.events merge other.events
   }
 }
-trait EventGenerator[T] {
-  def element: T
-}
+
+
 

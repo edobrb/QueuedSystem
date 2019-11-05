@@ -5,11 +5,10 @@ import model.{QueueEvents, QueuedSystem}
 import utils.Avg
 import utils.RichIterator._
 import utils.RichDouble._
+import distributions.EventsGenerator._
+import distributions.EventGenerator._
 
 object Helper {
-  /**
-   * Generate event until from 0 to T according to Distribution D.
-   */
   def avgθ(μ: Double): Double = 1 / μ
 
   def μ(avgθ: Double): Double = 1 / avgθ
@@ -32,7 +31,7 @@ object Prove extends App {
   val A0 = 60
   val avgθ: Double = 0.0121
   val μ = Helper.μ(avgθ)
-  val system = QueuedSystem(ExponentialDistribution(λ), ExponentialDistribution(μ), m = 1, l = 1000000)
+  val system = QueuedSystem(inEvents = ExponentialDistribution(λ), serviceDurations = ExponentialDistribution(μ), m = 1, l = 1000000)
 
   val take = 10000000
 
@@ -58,7 +57,7 @@ object Test extends App {
   val A0 = 60
   val avgθ: Double = 0.0121
   val μ = Helper.μ(avgθ)
-  val system = QueuedSystem(ExponentialDistribution(λ), ExponentialDistribution(μ), m = 1, l = 1000000)
+  val system = QueuedSystem(ExponentialDistribution(λ), ExponentialDistribution(μ), m = 1, l = 1000)
 
   //val n = 1000000
   val n = 10000000
@@ -81,5 +80,6 @@ object Test extends App {
     case QueueEvents.DequeuedEvent(_, _, queuedTime) => if (queuedTime < 0.2) 1 else 0
   }.foldLeft(Avg())((avg, queuedTime) => avg.add(queuedTime))
 
-  println("P(ε > 0.2) = " + p)
+  println("P(ε < 0.2) = " + p)
+  assert(p.value > 0.95)
 }

@@ -2,12 +2,13 @@ package model
 
 import java.util.Random
 
+import distributions.EventGenerator._
 import distributions.EventsGenerator._
 import model.QueueEvents._
 import utils.{FastFixedOrderedQueue, FastFixedQueue}
 
 
-case class QueuedSystem(inEvents: TimeEventsGenerator, outDurations: TimeDurationGenerator, m: Int, l: Int)(implicit random: Random) {
+case class QueuedSystem(inEvents: TimeEventsGenerator, serviceDurations: TimeDurationGenerator, m: Int, l: Int)(implicit random: Random) {
 
   def eventsSimulation: Iterator[QueueEvent] = {
     new Iterator[QueueEvent] {
@@ -25,7 +26,7 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outDurations: TimeDuratio
       def getNext(): Item = {
         if (cachedNext == null) {
           val enter:Double = enterStream.next()
-          val left:Double = enter + outDurations.element
+          val left:Double = enter + serviceDurations.element
           id = id + 1
           Item(enter, enter, left, id)
         } else {
@@ -79,7 +80,7 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, outDurations: TimeDuratio
                 inside = inside - 1
                 val queueHead = enqueued.dequeue()
                 if (queueHead.isDefined) {
-                  lastDequeued = Item(queueHead.get.enterTime, nextExiting.exitTime, nextExiting.exitTime + outDurations.element, queueHead.get.id)
+                  lastDequeued = Item(queueHead.get.enterTime, nextExiting.exitTime, nextExiting.exitTime + serviceDurations.element, queueHead.get.id)
                   items enqueue lastDequeued
                 }
                 LeftEvent(nextExiting.exitTime, nextExiting.id, nextExiting.exitTime - nextExiting.queueExitTime, nextExiting.queueExitTime - nextExiting.enterTime)
