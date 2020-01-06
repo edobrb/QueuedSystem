@@ -1,12 +1,12 @@
 import java.util.Random
 
-import distributions.{ExponentialDistribution, FixedDistribution}
-import model.{QueueEvents, QueuedSystem}
-import utils.Avg
-import utils.RichIterator._
-import utils.RichDouble._
-import distributions.EventsGenerator._
 import distributions.EventGenerator._
+import distributions.EventsGenerator._
+import distributions.ExponentialDistribution
+import model.{PrioritizedQueuedSystem, QueueEvents, QueuedSystem}
+import utils.Avg
+import utils.RichDouble._
+import utils.RichIterator._
 
 object Helper {
   def avgθ(μ: Double): Double = 1 / μ
@@ -27,25 +27,38 @@ object Prove extends App {
   implicit private val random: Random = new Random(1234)
 
 
-  val λ = 67 / 2.0
-  val A0 = 60
-  val avgθ: Double = 0.0121
-  val μ = Helper.μ(avgθ)
-  val system = QueuedSystem(inEvents = ExponentialDistribution(λ), serviceDurations = ExponentialDistribution(μ), m = 1, l = 1000000)
+  val λ = 10
+  val avgθ: Double = 1
+  val μ = Helper.μ(0.004)
+  //val lines = QueuedSystem(inEvents = ExponentialDistribution(λ), serviceDurations = ExponentialDistribution(μ), m = 4, l = 0)
+  val system = PrioritizedQueuedSystem(
+    insEvents = Seq(ExponentialDistribution(10), ExponentialDistribution(50), ExponentialDistribution(50)),
+    servicesDurations = Seq(ExponentialDistribution(μ), ExponentialDistribution(μ / 2), ExponentialDistribution(μ / 2)),
+    m = 1, l = 1000)
 
-  val take = 10000000
 
-  println(system.statesSimulation.take(take).last.stats)
+  //val system2 = QueuedSystem(inEvents = system.rejected, serviceDurations = FixedDistribution(μ), m = 6, l = 0)
 
-  val system2 = QueuedSystem(system.output + system.output, ExponentialDistribution(μ), m = 1, l = 1000000)
+  val take = 100000000
 
-  println(system2.statesSimulation.take(take).last.stats)
+  val a = system.statesSimulation.take(take).last
+  println(a.stats)
+  println(system.getTraffic(0).statesSimulation.takeWhile(_.t < a.t).last.stats)
+  println(system.getTraffic(1).statesSimulation.takeWhile(_.t < a.t).last.stats)
+  println(system.getTraffic(2).statesSimulation.takeWhile(_.t < a.t).last.stats)
 
-  val system3 = QueuedSystem(ExponentialDistribution(λ * 2), FixedDistribution(0.0121), m = 1, l = 1000000)
 
-  println(system3.statesSimulation.take(take).last.stats)
+  //println(system2.statesSimulation.takeWhile(_.t < a.t).last.stats)
+  /*
+    val system2 = QueuedSystem(system.output + system.output, ExponentialDistribution(μ), m = 1, l = 1000000)
 
-  //system.leftEvents.events.take(100).foreach(println)
+    println(system2.statesSimulation.take(take).last.stats)
+
+    val system3 = QueuedSystem(ExponentialDistribution(λ * 2), FixedDistribution(0.0121), m = 1, l = 1000000)
+
+    println(system3.statesSimulation.take(take).last.stats)
+
+    //system.leftEvents.events.take(100).foreach(println)*/
 }
 
 object Test extends App {
@@ -60,7 +73,7 @@ object Test extends App {
   val system = QueuedSystem(ExponentialDistribution(λ), ExponentialDistribution(μ), m = 1, l = 1000)
 
   //val n = 1000000
-  val n = 10000000
+  val n = 100000000
 
 
   val last = system.statesSimulation.take(n).last

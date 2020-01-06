@@ -3,10 +3,10 @@ package model
 import utils.Avg
 import utils.RichDouble._
 
-case class QueuedSystemState(system: QueuedSystem, t: Double = 0, rejected: Int = 0, computed: Int = 0,
+case class QueuedSystemState(system: QueuedSystemStructure, t: Double = 0, rejected: Int = 0, computed: Int = 0,
                              processing: Int = 0, queued: Int = 0, totalDequeued: Int = 0, stats: Stats = Stats()) {
   override def toString: String = {
-    s"[λ: ${system.inEvents}, μ: ${system.serviceDurations}, m: ${system.m}, l: ${system.l}] --> {t: ${t.round(4)} | " +
+    s"[m: ${system.m}, l: ${system.l}] --> {t: ${t.round(4)} | " +
       s"processing: $processing | queued: $queued | computed: $computed | rej: $rejected | totalDequeued: $totalDequeued\nstats: $stats"
   }
 }

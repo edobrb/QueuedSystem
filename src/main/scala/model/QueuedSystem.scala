@@ -5,92 +5,12 @@ import java.util.Random
 import distributions.EventGenerator._
 import distributions.EventsGenerator._
 import model.QueueEvents._
-import utils.{FastFixedOrderedQueue, FastFixedQueue}
+import utils.RichIterator._
+import utils.{BinaryHeap, FastFixedQueue}
 
+trait QueuedSystemAnalyzer extends QueuedSystemStructure {
 
-case class QueuedSystem(inEvents: TimeEventsGenerator, serviceDurations: TimeDurationGenerator, m: Int, l: Int)(implicit random: Random) {
-
-  def eventsSimulation: Iterator[QueueEvent] = {
-    new Iterator[QueueEvent] {
-      case class Item(enterTime: Double, queueExitTime: Double, exitTime: Double, id: Long)
-
-      var id: Long = 0
-      var cachedNext: Item = _
-      var enterStream: Iterator[Double] = inEvents.events
-      var inside = 0
-      var items: FastFixedOrderedQueue[Item] = new FastFixedOrderedQueue[Item](m, (i1, i2) => i1.exitTime - i2.exitTime)
-      var enqueued: FastFixedQueue[Item] = new FastFixedQueue[Item](l)
-      var lastDequeued: Item = _
-
-
-      def getNext(): Item = {
-        if (cachedNext == null) {
-          val enter:Double = enterStream.next()
-          val left:Double = enter + serviceDurations.element
-          id = id + 1
-          Item(enter, enter, left, id)
-        } else {
-          val tmp = cachedNext
-          cachedNext = null
-          tmp
-        }
-
-      }
-
-      def peekNext(): Item = {
-        if (cachedNext == null) {
-          cachedNext = getNext()
-        }
-        cachedNext
-      }
-
-      def newEnterItem(): EnterEvent = {
-        val item = getNext()
-        items.enqueue(item)
-        inside = inside + 1
-        EnterEvent(item.enterTime, item.id)
-      }
-
-      override def hasNext: Boolean = true
-
-      override def next(): QueueEvent = {
-        if (lastDequeued != null) {
-          val tmp = lastDequeued
-          lastDequeued = null
-          DequeuedEvent(tmp.queueExitTime, tmp.id, tmp.queueExitTime - tmp.enterTime)
-        } else {
-          items match {
-            case _ if items.isEmpty => //will be processed
-              newEnterItem()
-            case _ =>
-              val nextExiting = items.peek().get
-              val next = peekNext()
-              if (next.enterTime < nextExiting.exitTime && inside < m) { //will be processed
-                newEnterItem()
-              } else if (next.enterTime < nextExiting.exitTime && inside < m + l) { //will be enqueued
-                val item = getNext()
-                enqueued.enqueue(item)
-                inside = inside + 1
-                EnqueuedEvent(item.enterTime, item.id)
-              } else if (next.enterTime < nextExiting.exitTime) { //will be rejected
-                val item = getNext()
-                RejectedEvent(item.enterTime, item.id)
-              } else { //next will left
-                items.dequeue()
-                inside = inside - 1
-                val queueHead = enqueued.dequeue()
-                if (queueHead.isDefined) {
-                  lastDequeued = Item(queueHead.get.enterTime, nextExiting.exitTime, nextExiting.exitTime + serviceDurations.element, queueHead.get.id)
-                  items enqueue lastDequeued
-                }
-                LeftEvent(nextExiting.exitTime, nextExiting.id, nextExiting.exitTime - nextExiting.queueExitTime, nextExiting.queueExitTime - nextExiting.enterTime)
-              }
-          }
-        }
-      }
-    }
-  }
-
+  def eventsSimulation: Iterator[QueueEvent]
 
   def statesSimulation: Iterator[QueuedSystemState] =
     eventsSimulation.scanLeft[QueuedSystemState](QueuedSystemState(this)) { case (oldState, event) =>
@@ -145,9 +65,131 @@ case class QueuedSystem(inEvents: TimeEventsGenerator, serviceDurations: TimeDur
     }
 
 
-  def output: TimeEventsGenerator = new TimeEventsGenerator {
+  def served: TimeEventsGenerator = new TimeEventsGenerator {
     override def events: Iterator[Double] = eventsSimulation.collect {
       case LeftEvent(t, _, _, _) => t
     }
   }
+
+  def rejected: TimeEventsGenerator = new TimeEventsGenerator {
+    override def events: Iterator[Double] = eventsSimulation.collect {
+      case RejectedEvent(t, _) => t
+    }
+  }
+}
+
+trait QueuedSystemStructure {
+  def m: Int
+
+  def l: Int
+}
+
+case class PrioritizedQueuedSystem(insEvents: Seq[TimeEventsGenerator], servicesDurations: Seq[TimeDurationGenerator], m: Int, l: Int)(implicit random: Random) extends QueuedSystemAnalyzer {
+
+  def prioritizedEventsSimulation: Iterator[(Int, QueueEvent)] = {
+    new Iterator[(Int, QueueEvent)] {
+
+      case class Item(index: Int, enterTime: Double, queueExitTime: Double, exitTime: Double, id: Long)
+
+      var id: Long = 0
+      var cachedNext: Item = _
+      var enterStream: Iterator[(Int, Double)] = insEvents.map(_.events).zipWithIndex.map(v => v._1.map(t => (v._2, t)))
+        .merged((x: (Int, Double), y: (Int, Double)) => (x._2, y._2) match {
+          case (x, y) if x > y => 1
+          case (x, y) if x < y => -1
+          case _ => 0
+        })
+      var inside = 0
+      var items: BinaryHeap[Item] = new BinaryHeap[Item]((x: Item, y: Item) => if (x.exitTime - y.exitTime > 0) 1 else -1)
+      var enqueued: Seq[FastFixedQueue[Item]] = Seq.fill(insEvents.size)(new FastFixedQueue[Item](l))
+      var lastDequeued: Item = _
+
+
+      def getNext(): Item = {
+        if (cachedNext == null) {
+          val (index, enterTime) = enterStream.next()
+          val leftTime = enterTime + servicesDurations(index).element
+          id = id + 1
+          Item(index, enterTime, enterTime, leftTime, id)
+        } else {
+          val tmp = cachedNext
+          cachedNext = null
+          tmp
+        }
+      }
+
+      def peekNext(): Item = {
+        if (cachedNext == null) {
+          cachedNext = getNext()
+        }
+        cachedNext
+      }
+
+      def newEnterItem(): (Int, EnterEvent) = {
+        val item = getNext()
+        items.enqueue(item)
+        inside = inside + 1
+        (item.index, EnterEvent(item.enterTime, item.id))
+      }
+
+      override def hasNext: Boolean = true
+
+      override def next(): (Int, QueueEvent) = {
+        if (lastDequeued != null) {
+          val tmp = lastDequeued
+          lastDequeued = null
+          (tmp.index, DequeuedEvent(tmp.queueExitTime, tmp.id, tmp.queueExitTime - tmp.enterTime))
+        } else {
+          items match {
+            case _ if items.isEmpty => //will be processed
+              newEnterItem()
+            case _ =>
+              val nextExiting = items.peek().get
+              val next = peekNext()
+              if (next.enterTime < nextExiting.exitTime && inside < m) { //will be processed
+                newEnterItem()
+              } else if (next.enterTime < nextExiting.exitTime && inside < m + l) { //will be enqueued
+                val item = getNext()
+                enqueued(item.index).enqueue(item)
+                inside = inside + 1
+                (item.index, EnqueuedEvent(item.enterTime, item.id))
+              } else if (next.enterTime < nextExiting.exitTime) { //will be rejected
+                val item = getNext()
+                (item.index, RejectedEvent(item.enterTime, item.id))
+              } else { //next will left
+                items.dequeue()
+                inside = inside - 1
+                val firstNonEmptyQueue = enqueued.find(!_.isEmpty)
+                if (firstNonEmptyQueue.isDefined) {
+                  val dequeued = firstNonEmptyQueue.get.dequeue().get
+                  lastDequeued = Item(dequeued.index, dequeued.enterTime, nextExiting.exitTime, nextExiting.exitTime + servicesDurations(dequeued.index).element, dequeued.id)
+                  items.enqueue(lastDequeued)
+                }
+                (nextExiting.index, LeftEvent(nextExiting.exitTime, nextExiting.id, nextExiting.exitTime - nextExiting.queueExitTime, nextExiting.queueExitTime - nextExiting.enterTime))
+              }
+          }
+        }
+      }
+    }
+  }
+
+  override def eventsSimulation: Iterator[QueueEvent] = prioritizedEventsSimulation.map(_._2)
+
+  def getTraffic(index: Int): QueuedSystemAnalyzer = {
+    val _this = this
+    new QueuedSystemAnalyzer {
+      override def eventsSimulation: Iterator[QueueEvent] = _this.prioritizedEventsSimulation.filter(_._1 == index).map(_._2)
+
+      override def m: Int = _this.m
+
+      override def l: Int = _this.l
+    }
+  }
+}
+
+case class QueuedSystem(inEvents: TimeEventsGenerator, serviceDurations: TimeDurationGenerator, m: Int, l: Int)(implicit random: Random) extends QueuedSystemAnalyzer {
+
+  private val system = PrioritizedQueuedSystem(Seq(inEvents), Seq(serviceDurations), m, l)
+
+  def eventsSimulation: Iterator[QueueEvent] = system.eventsSimulation
 }

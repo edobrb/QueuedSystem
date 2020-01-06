@@ -44,7 +44,7 @@ class FastFixedOrderedQueue[T: ClassTag](maxSize: Int, compare: (T, T) => Double
 
 }
 
-object Test2 extends App {
+object Test3 extends App {
   val q = new FastFixedOrderedQueue[Int](4, _ - _)
 
   assert(q.dequeue().isEmpty)

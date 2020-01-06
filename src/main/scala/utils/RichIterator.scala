@@ -1,6 +1,11 @@
 package utils
 
+
 object RichIterator {
+
+  implicit class RichIterators[T](val its: Seq[Iterator[T]]) {
+    def merged(implicit ord: Ordering[T]): Iterator[T] = its.reduce((a, b) => a.merge(b))
+  }
 
   implicit class RichIterator[T](val it: Iterator[T]) {
     def last: T = {
