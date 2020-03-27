@@ -1,5 +1,7 @@
 package utils
 
+import java.util.concurrent.locks.Condition
+
 
 object RichIterator {
 
@@ -41,6 +43,70 @@ object RichIterator {
         }
       }
     }
-  }
 
+    def mergeByTime(other: Iterator[T]): Iterator[T] = new Iterator[T] {
+      val queue = new scala.collection.mutable.Queue[T]()
+      import java.util.concurrent.locks.ReentrantLock
+      val queueLock = new ReentrantLock(true)
+      val queueCond = queueLock.newCondition()
+      object HasNext {
+        private var count = 0
+        private var noCount = 0
+        private val lock = new Object()
+
+        def inc(): Unit = lock synchronized {
+          count += 1;
+          lock.notify()
+        }
+
+        def dec(): Unit = lock synchronized {
+          count -= 1;
+          lock.notify()
+        }
+
+        def no(): Unit = lock synchronized {
+          noCount += 1;
+          lock.notify()
+        }
+
+        def response(): Boolean = lock synchronized {
+          if (count > 0) true
+          else if (noCount >= 2) false
+          else {
+            lock.wait()
+            response()
+          }
+        }
+      }
+
+      def createThread(iterator: Iterator[T]): Thread =
+        new Thread(() => {
+          while (iterator.hasNext) {
+            HasNext.inc()
+            val value = iterator.next()
+            queueLock.lock()
+            queue.enqueue(value)
+            queueCond.signal()
+            queueLock.unlock()
+          }
+          HasNext.no()
+        })
+
+      createThread(it).start()
+      createThread(other).start()
+
+      override def hasNext: Boolean = HasNext.response()
+
+      override def next(): T = {
+        queueLock.lock()
+        while (queue.isEmpty) {
+          queueCond.awaitUninterruptibly()
+        }
+        HasNext.dec()
+        val ret = queue.dequeue()
+        queueLock.unlock()
+        ret
+      }
+    }
+  }
 }
