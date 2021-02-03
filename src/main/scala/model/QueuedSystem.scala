@@ -93,19 +93,19 @@ case class PrioritizedQueuedSystem(insEvents: Seq[TimeEventsGenerator], services
 
       var id: Long = 0
       var cachedNext: Item = _
-      var enterStream: Iterator[(Int, Double)] = insEvents.map(_.events).zipWithIndex.map(v => v._1.map(t => (v._2, t)))
+      val enterStream: Iterator[(Int, Double)] = insEvents.map(_.events).zipWithIndex.map(v => v._1.map(t => (v._2, t)))
         .merged((x: (Int, Double), y: (Int, Double)) => (x._2, y._2) match {
           case (x, y) if x > y => 1
           case (x, y) if x < y => -1
           case _ => 0
         })
       var inside = 0
-      var items: BinaryHeap[Item] = new BinaryHeap[Item]((x: Item, y: Item) => if (x.exitTime - y.exitTime > 0) 1 else -1)
-      var enqueued: Seq[FastFixedQueue[Item]] = Seq.fill(insEvents.size)(new FastFixedQueue[Item](l))
+      val items: BinaryHeap[Item] = new BinaryHeap[Item]((x: Item, y: Item) => if (x.exitTime - y.exitTime > 0) 1 else -1)
+      val enqueued: Seq[FastFixedQueue[Item]] = Seq.fill(insEvents.size)(new FastFixedQueue[Item](l))
       var lastDequeued: Item = _
 
 
-      def getNext(): Item = {
+      def getNext: Item = {
         if (cachedNext == null) {
           val (index, enterTime) = enterStream.next()
           val leftTime = enterTime + servicesDurations(index).element
@@ -120,13 +120,13 @@ case class PrioritizedQueuedSystem(insEvents: Seq[TimeEventsGenerator], services
 
       def peekNext(): Item = {
         if (cachedNext == null) {
-          cachedNext = getNext()
+          cachedNext = getNext
         }
         cachedNext
       }
 
       def newEnterItem(): (Int, EnterEvent) = {
-        val item = getNext()
+        val item = getNext
         items.enqueue(item)
         inside = inside + 1
         (item.index, EnterEvent(item.enterTime, item.id))
@@ -149,12 +149,12 @@ case class PrioritizedQueuedSystem(insEvents: Seq[TimeEventsGenerator], services
               if (next.enterTime < nextExiting.exitTime && inside < m) { //will be processed
                 newEnterItem()
               } else if (next.enterTime < nextExiting.exitTime && inside < m + l) { //will be enqueued
-                val item = getNext()
+                val item = getNext
                 enqueued(item.index).enqueue(item)
                 inside = inside + 1
                 (item.index, EnqueuedEvent(item.enterTime, item.id))
               } else if (next.enterTime < nextExiting.exitTime) { //will be rejected
-                val item = getNext()
+                val item = getNext
                 (item.index, RejectedEvent(item.enterTime, item.id))
               } else { //next will left
                 items.dequeue()

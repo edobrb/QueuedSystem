@@ -5,18 +5,14 @@ import scala.reflect.ClassTag
 
 class BinaryHeap[T: ClassTag](ordering: Ordering[T]){
 
-
   private var root: Node = null
 
   class Node(val t: T) {
     val childs: ListBuffer[Node] = ListBuffer[Node]()
   }
 
-
   def dequeue(): Option[T] =  if(isEmpty) None else {
     val res = Some(root.t)
-
-
     if(root.childs.isEmpty) {
       root = null
     } else {
@@ -25,7 +21,6 @@ class BinaryHeap[T: ClassTag](ordering: Ordering[T]){
       root = min
       root.childs.appendAll(childs)
     }
-
     res
   }
 

@@ -46,26 +46,29 @@ object RichIterator {
 
     def mergeByTime(other: Iterator[T]): Iterator[T] = new Iterator[T] {
       val queue = new scala.collection.mutable.Queue[T]()
+
       import java.util.concurrent.locks.ReentrantLock
+
       val queueLock = new ReentrantLock(true)
-      val queueCond = queueLock.newCondition()
+      val queueCond: Condition = queueLock.newCondition()
+
       object HasNext {
         private var count = 0
         private var noCount = 0
         private val lock = new Object()
 
         def inc(): Unit = lock synchronized {
-          count += 1;
+          count += 1
           lock.notify()
         }
 
         def dec(): Unit = lock synchronized {
-          count -= 1;
+          count -= 1
           lock.notify()
         }
 
         def no(): Unit = lock synchronized {
-          noCount += 1;
+          noCount += 1
           lock.notify()
         }
 
@@ -109,4 +112,5 @@ object RichIterator {
       }
     }
   }
+
 }

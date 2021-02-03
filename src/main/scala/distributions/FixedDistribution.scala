@@ -1,7 +1,5 @@
 package distributions
 
-import java.util.Random
-
 import utils.RichDouble._
 
 /**
